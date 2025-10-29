@@ -37,6 +37,8 @@ import SearchIcon from "@mui/icons-material/Search";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import CloudUploadIcon from "@mui/icons-material/CloudUpload";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+import CheckIcon from "@mui/icons-material/Check";
+import CloseIcon from "@mui/icons-material/Close";
 import { db } from "../firebaseConfig";
 import {
   collection,
@@ -152,12 +154,43 @@ const DriverManagement = () => {
       setCompanyName(fetchedCompanyName);
       
       const driversRef = collection(db, "Drivers");
+      
+      // Fetch both approved and pending drivers for this user
       const driversQuery = query(driversRef, where("userId", "==", user.uid));
       const driversSnap = await getDocs(driversQuery);
+      
       let allDrivers = [];
       driversSnap.forEach((doc) => {
-        allDrivers.push({ id: doc.id, ...doc.data() });
+        const data = doc.data();
+        allDrivers.push({ 
+          id: doc.id, 
+          ...data,
+          // Ensure approvalStatus exists, default to 'approved' for old records
+          approvalStatus: data.approvalStatus || 'approved'
+        });
       });
+      
+      // Also fetch pending drivers from the company (if company_name exists)
+      if (fetchedCompanyName) {
+        const pendingQuery = query(
+          driversRef, 
+          where("company_name", "==", fetchedCompanyName),
+          where("approvalStatus", "==", "pending")
+        );
+        const pendingSnap = await getDocs(pendingQuery);
+        
+        pendingSnap.forEach((doc) => {
+          const data = doc.data();
+          // Add if not already in list (avoid duplicates)
+          if (!allDrivers.find(d => d.id === doc.id)) {
+            allDrivers.push({ 
+              id: doc.id, 
+              ...data 
+            });
+          }
+        });
+      }
+      
       setDrivers(allDrivers);
     } catch (error) {
       setSnackbar({
@@ -361,13 +394,78 @@ const DriverManagement = () => {
           type: "error",
         });
       }
+      setConfirmDialog({ open: false, action: "", driver: null });
+    } else if (action === "reject") {
+      // Handle rejection with reason input
+      const reason = document.getElementById("rejection-reason")?.value || "";
+      await handleRejectWithReason(reason);
     }
-    setConfirmDialog({ open: false, action: "", driver: null });
   };
 
   const handleView = (driver) => {
     setViewData(driver);
     setViewDialogOpen(true);
+  };
+
+  const handleApprove = async (driver) => {
+    try {
+      const driverDocRef = doc(db, "Drivers", driver.id);
+      await setDoc(driverDocRef, {
+        ...driver,
+        approvalStatus: "approved",
+        approvedBy: companyName || "Corporate Admin",
+        approvedDate: Timestamp.now().toDate().toISOString(),
+        rejectionReason: null,
+      }, { merge: true });
+      
+      await fetchDrivers();
+      
+      setSnackbar({
+        open: true,
+        message: `Driver ${driver.firstName} ${driver.lastName} has been approved!`,
+        type: "success",
+      });
+    } catch (error) {
+      setSnackbar({
+        open: true,
+        message: "Error approving driver: " + error.message,
+        type: "error",
+      });
+    }
+  };
+
+  const handleReject = async (driver) => {
+    setConfirmDialog({ open: true, action: "reject", driver });
+  };
+
+  const handleRejectWithReason = async (reason) => {
+    const { driver } = confirmDialog;
+    try {
+      const driverDocRef = doc(db, "Drivers", driver.id);
+      await setDoc(driverDocRef, {
+        ...driver,
+        approvalStatus: "rejected",
+        rejectedBy: companyName || "Corporate Admin",
+        rejectedDate: Timestamp.now().toDate().toISOString(),
+        rejectionReason: reason || "No reason provided",
+      }, { merge: true });
+      
+      await fetchDrivers();
+      
+      setSnackbar({
+        open: true,
+        message: `Driver ${driver.firstName} ${driver.lastName} has been rejected.`,
+        type: "warning",
+      });
+      
+      setConfirmDialog({ open: false, action: "", driver: null });
+    } catch (error) {
+      setSnackbar({
+        open: true,
+        message: "Error rejecting driver: " + error.message,
+        type: "error",
+      });
+    }
   };
 
   if (!user) {
@@ -435,6 +533,7 @@ const DriverManagement = () => {
                 <TableCell>City</TableCell>
                 <TableCell>State</TableCell>
                 <TableCell>Vehicle No</TableCell>
+                <TableCell align="center">Status</TableCell>
                 <TableCell align="center">Actions</TableCell>
               </TableRow>
             </TableHead>
@@ -447,7 +546,7 @@ const DriverManagement = () => {
                 </TableRow>
               ) : filtered.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} align="center">
+                  <TableCell colSpan={8} align="center">
                     No drivers found.
                   </TableCell>
                 </TableRow>
@@ -461,30 +560,80 @@ const DriverManagement = () => {
                     <TableCell>{driver.state}</TableCell>
                     <TableCell>{driver.vehicleNumber}</TableCell>
                     <TableCell align="center">
-                      <Stack
-                        direction="row"
-                        spacing={1}
-                        justifyContent="center"
-                      >
-                        <IconButton
-                          onClick={() => handleView(driver)}
-                          color="info"
+                      <Chip
+                        label={driver.approvalStatus === "pending" ? "Pending" : driver.approvalStatus === "rejected" ? "Rejected" : "Approved"}
+                        color={
+                          driver.approvalStatus === "pending" 
+                            ? "warning" 
+                            : driver.approvalStatus === "rejected"
+                            ? "error"
+                            : "success"
+                        }
+                        size="small"
+                        sx={{ fontWeight: 600 }}
+                      />
+                    </TableCell>
+                    <TableCell align="center">
+                      {driver.approvalStatus === "pending" ? (
+                        <Stack
+                          direction="row"
+                          spacing={1}
+                          justifyContent="center"
                         >
-                          <VisibilityIcon />
-                        </IconButton>
-                        <IconButton
-                          onClick={() => handleEditConfirm(driver)}
-                          color="primary"
+                          <IconButton
+                            onClick={() => handleView(driver)}
+                            color="info"
+                            size="small"
+                          >
+                            <VisibilityIcon />
+                          </IconButton>
+                          <IconButton
+                            onClick={() => handleApprove(driver)}
+                            color="success"
+                            size="small"
+                            title="Approve"
+                          >
+                            <CheckIcon />
+                          </IconButton>
+                          <IconButton
+                            onClick={() => handleReject(driver)}
+                            color="error"
+                            size="small"
+                            title="Reject"
+                          >
+                            <CloseIcon />
+                          </IconButton>
+                        </Stack>
+                      ) : (
+                        <Stack
+                          direction="row"
+                          spacing={1}
+                          justifyContent="center"
                         >
-                          <EditIcon />
-                        </IconButton>
-                        <IconButton
-                          onClick={() => handleDeleteConfirm(driver)}
-                          color="error"
-                        >
-                          <DeleteIcon />
-                        </IconButton>
-                      </Stack>
+                          <IconButton
+                            onClick={() => handleView(driver)}
+                            color="info"
+                          >
+                            <VisibilityIcon />
+                          </IconButton>
+                          {driver.approvalStatus !== "rejected" && (
+                            <>
+                              <IconButton
+                                onClick={() => handleEditConfirm(driver)}
+                                color="primary"
+                              >
+                                <EditIcon />
+                              </IconButton>
+                              <IconButton
+                                onClick={() => handleDeleteConfirm(driver)}
+                                color="error"
+                              >
+                                <DeleteIcon />
+                              </IconButton>
+                            </>
+                          )}
+                        </Stack>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))
@@ -712,8 +861,20 @@ const DriverManagement = () => {
             <Typography variant="h6">Driver Details</Typography>
             {viewData && (
               <Chip
-                label={viewData.approvalStatus || "Approved"}
-                color="success"
+                label={
+                  viewData.approvalStatus === "pending" 
+                    ? "Pending" 
+                    : viewData.approvalStatus === "rejected"
+                    ? "Rejected"
+                    : "Approved"
+                }
+                color={
+                  viewData.approvalStatus === "pending" 
+                    ? "warning" 
+                    : viewData.approvalStatus === "rejected"
+                    ? "error"
+                    : "success"
+                }
                 size="small"
               />
             )}
@@ -767,28 +928,89 @@ const DriverManagement = () => {
               </Paper>
 
               {/* Approval Information */}
-              <Paper elevation={0} sx={{ p: 2, bgcolor: "#e8f5e9" }}>
-                <Typography variant="subtitle1" fontWeight={600} color="success.main" gutterBottom>
-                  ✅ Approval Information
-                </Typography>
-                <Stack spacing={1}>
-                  <Typography variant="body2">
-                    <strong>Approved By:</strong> {viewData.approvedBy || "N/A"}
+              {viewData.approvalStatus === "approved" && (
+                <Paper elevation={0} sx={{ p: 2, bgcolor: "#e8f5e9" }}>
+                  <Typography variant="subtitle1" fontWeight={600} color="success.main" gutterBottom>
+                    ✅ Approval Information
+                  </Typography>
+                  <Stack spacing={1}>
+                    <Typography variant="body2">
+                      <strong>Approved By:</strong> {viewData.approvedBy || "N/A"}
+                    </Typography>
+                    <Typography variant="body2">
+                      <strong>Approval Date:</strong>{" "}
+                      {viewData.approvedDate
+                        ? new Date(viewData.approvedDate).toLocaleString()
+                        : "N/A"}
+                    </Typography>
+                    <Typography variant="body2">
+                      <strong>Registration Date:</strong>{" "}
+                      {viewData.registrationDate
+                        ? new Date(viewData.registrationDate).toLocaleString()
+                        : "N/A"}
+                    </Typography>
+                  </Stack>
+                </Paper>
+              )}
+
+              {/* Rejection Information */}
+              {viewData.approvalStatus === "rejected" && (
+                <Paper elevation={0} sx={{ p: 2, bgcolor: "#ffebee" }}>
+                  <Typography variant="subtitle1" fontWeight={600} color="error.main" gutterBottom>
+                    ❌ Rejection Information
+                  </Typography>
+                  <Stack spacing={1}>
+                    <Typography variant="body2">
+                      <strong>Rejected By:</strong> {viewData.rejectedBy || "N/A"}
+                    </Typography>
+                    <Typography variant="body2">
+                      <strong>Rejection Date:</strong>{" "}
+                      {viewData.rejectedDate
+                        ? new Date(viewData.rejectedDate).toLocaleString()
+                        : "N/A"}
+                    </Typography>
+                    <Typography variant="body2">
+                      <strong>Reason:</strong> {viewData.rejectionReason || "No reason provided"}
+                    </Typography>
+                  </Stack>
+                </Paper>
+              )}
+
+              {/* Pending Status */}
+              {viewData.approvalStatus === "pending" && (
+                <Paper elevation={0} sx={{ p: 2, bgcolor: "#fff3e0" }}>
+                  <Typography variant="subtitle1" fontWeight={600} color="warning.main" gutterBottom>
+                    ⏳ Pending Approval
                   </Typography>
                   <Typography variant="body2">
-                    <strong>Approval Date:</strong>{" "}
-                    {viewData.approvedDate
-                      ? new Date(viewData.approvedDate).toLocaleString()
-                      : "N/A"}
+                    This driver application is awaiting approval from the corporate admin.
                   </Typography>
-                  <Typography variant="body2">
-                    <strong>Registration Date:</strong>{" "}
-                    {viewData.registrationDate
-                      ? new Date(viewData.registrationDate).toLocaleString()
-                      : "N/A"}
-                  </Typography>
-                </Stack>
-              </Paper>
+                  <Stack direction="row" spacing={2} mt={2}>
+                    <Button
+                      variant="contained"
+                      color="success"
+                      startIcon={<CheckIcon />}
+                      onClick={() => {
+                        setViewDialogOpen(false);
+                        handleApprove(viewData);
+                      }}
+                    >
+                      Approve
+                    </Button>
+                    <Button
+                      variant="contained"
+                      color="error"
+                      startIcon={<CloseIcon />}
+                      onClick={() => {
+                        setViewDialogOpen(false);
+                        handleReject(viewData);
+                      }}
+                    >
+                      Reject
+                    </Button>
+                  </Stack>
+                </Paper>
+              )}
 
               {/* Documents */}
               <Paper elevation={0} sx={{ p: 2, bgcolor: "#f5f5f5" }}>
@@ -840,23 +1062,41 @@ const DriverManagement = () => {
         </DialogActions>
       </Dialog>
 
-      {/* Confirmation Dialog for Delete */}
+      {/* Confirmation Dialog for Delete/Reject */}
       <Dialog
         open={confirmDialog.open}
         onClose={() => setConfirmDialog({ ...confirmDialog, open: false })}
         TransitionComponent={Transition}
+        maxWidth="sm"
+        fullWidth
       >
         <DialogTitle>
-          {`Confirm ${
-            confirmDialog.action === "delete" ? "Deletion" : "Action"
-          }`}
+          {confirmDialog.action === "delete" 
+            ? "Confirm Deletion" 
+            : confirmDialog.action === "reject"
+            ? "Reject Driver Application"
+            : "Confirm Action"}
         </DialogTitle>
         <DialogContent>
           <DialogContentText>
             {confirmDialog.action === "delete"
               ? "Are you sure you want to delete this driver? This action cannot be undone."
+              : confirmDialog.action === "reject"
+              ? `Are you sure you want to reject ${confirmDialog.driver?.firstName} ${confirmDialog.driver?.lastName}'s application?`
               : "Are you sure you want to proceed with this action?"}
           </DialogContentText>
+          
+          {confirmDialog.action === "reject" && (
+            <TextField
+              id="rejection-reason"
+              label="Rejection Reason (Optional)"
+              multiline
+              rows={3}
+              fullWidth
+              placeholder="Enter reason for rejection..."
+              sx={{ mt: 2 }}
+            />
+          )}
         </DialogContent>
         <DialogActions>
           <Button
@@ -867,9 +1107,13 @@ const DriverManagement = () => {
           <Button
             onClick={handleConfirmAction}
             variant="contained"
-            color={confirmDialog.action === "delete" ? "error" : "primary"}
+            color={confirmDialog.action === "delete" || confirmDialog.action === "reject" ? "error" : "primary"}
           >
-            {confirmDialog.action === "delete" ? "Delete" : "Confirm"}
+            {confirmDialog.action === "delete" 
+              ? "Delete" 
+              : confirmDialog.action === "reject"
+              ? "Reject Driver"
+              : "Confirm"}
           </Button>
         </DialogActions>
       </Dialog>
