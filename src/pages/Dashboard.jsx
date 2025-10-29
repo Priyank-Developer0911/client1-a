@@ -7,8 +7,6 @@ import {
 import { useLocation, useNavigate, Routes, Route, Navigate } from "react-router-dom";
 import MenuIcon from "@mui/icons-material/Menu";
 import MenuOpenIcon from "@mui/icons-material/MenuOpen";
-import Brightness4Icon from "@mui/icons-material/Brightness4";
-import Brightness7Icon from "@mui/icons-material/Brightness7";
 import DashboardIcon from "@mui/icons-material/Dashboard";
 import ShoppingCartIcon from "@mui/icons-material/ShoppingCart";
 import PeopleIcon from "@mui/icons-material/People";
@@ -51,7 +49,6 @@ const navItems = [
 function Dashboard() {
   const [open, setOpen] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [darkMode, setDarkMode] = useState(false);
   const [userName, setUserName] = useState("");
   const [userData, setUserData] = useState(null);
   const [kycStatus, setKycStatus] = useState(null); // 'not-submitted', 'pending', 'completed'
@@ -64,7 +61,7 @@ function Dashboard() {
   const location = useLocation();
 
   const customTheme = createTheme({
-    palette: { mode: darkMode ? "dark" : "light" },
+    palette: { mode: "light" },
   });
 
   const handleDrawerToggle = () => {
@@ -246,9 +243,6 @@ function Dashboard() {
               {getKycStatusChip()}
             </Box>
             <Typography variant="subtitle1" sx={{ mr: 2, fontWeight: "bold" }}>{userName}</Typography>
-            <IconButton color="inherit" onClick={() => setDarkMode(!darkMode)}>
-              {darkMode ? <Brightness7Icon /> : <Brightness4Icon />}
-            </IconButton>
             <Button color="inherit" onClick={handleLogout}>Logout</Button>
           </Toolbar>
         </AppBar>

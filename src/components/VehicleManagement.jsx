@@ -26,6 +26,7 @@ import {
   Alert,
   Stack,
   InputAdornment,
+  Select,
   Slide,
   DialogContentText,
   TableContainer,
@@ -75,6 +76,7 @@ const initialFormState = {
   vehicle_type: "",
   subtype: "",
   capacity: "",
+  capacity_unit: "Ton", // New field for unit selection
   available_wheels: "",
   price_per_kg: "",
   price_per_tonne: "",
@@ -189,7 +191,7 @@ const vehicleService = {
   saveVehicle: async (vehicleData, originalVehicle, userId) => {
     if (!userId) throw new Error("User not authenticated");
     
-    const { vehicle_type, company_name, subtype, capacity, available_wheels, price_per_kg, price_per_tonne } = vehicleData;
+    const { vehicle_type, company_name, subtype, capacity, capacity_unit, available_wheels, price_per_kg, price_per_tonne } = vehicleData;
     
     if (!vehicle_type || !company_name || !subtype) {
       throw new Error("Vehicle type, company name, and subtype are required");
@@ -223,6 +225,7 @@ const vehicleService = {
       company_name: cleanCompanyName,
       subtype: cleanSubtype,
       capacity: sanitizeString(capacity),
+      capacity_unit: sanitizeString(capacity_unit || "Ton"),
       available_wheels: sanitizeString(available_wheels),
       price_per_kg: sanitizeString(price_per_kg),
       price_per_tonne: sanitizeString(price_per_tonne),
@@ -604,7 +607,7 @@ function VehicleTable({ vehicles, loading, onView, onEdit, onDelete }) {
                 </TableCell>
                 <TableCell>{v.subtype}</TableCell>
                 <TableCell>{v.vehicle_type}</TableCell>
-                <TableCell>{v.capacity}</TableCell>
+                <TableCell>{v.capacity} {v.capacity_unit || 'Ton'}</TableCell>
                 <TableCell>{v.available_wheels}</TableCell>
                 <TableCell>{v.price_per_kg}</TableCell>
                 <TableCell>{v.price_per_tonne}</TableCell>
@@ -681,6 +684,11 @@ function VehicleFormDialog({ open, onClose, onSubmit, vehicle, isEditMode, compa
       <DialogContent>
         <Stack spacing={2} mt={1}>
           {Object.keys(initialFormState).map((key) => {
+            // Skip capacity_unit as it's handled with capacity field
+            if (key === "capacity_unit") {
+              return null;
+            }
+
             // Render dropdown for vehicle_type
             if (key === "vehicle_type") {
               return (
@@ -701,6 +709,44 @@ function VehicleFormDialog({ open, onClose, onSubmit, vehicle, isEditMode, compa
                     </MenuItem>
                   ))}
                 </TextField>
+              );
+            }
+
+            // Special handling for capacity field with unit selector
+            if (key === "capacity") {
+              return (
+                <TextField
+                  key={key}
+                  name={key}
+                  label="Capacity"
+                  value={formData[key]}
+                  onChange={handleChange}
+                  error={!!errors[key]}
+                  helperText={errors[key]}
+                  fullWidth
+                  type="number"
+                  inputProps={{ min: 0, step: "any" }}
+                  InputProps={{
+                    endAdornment: (
+                      <InputAdornment position="end">
+                        <Select
+                          name="capacity_unit"
+                          value={formData.capacity_unit || "Ton"}
+                          onChange={handleChange}
+                          sx={{ 
+                            minWidth: 80,
+                            '& .MuiOutlinedInput-notchedOutline': { border: 0 },
+                            '&:hover .MuiOutlinedInput-notchedOutline': { border: 0 },
+                            '&.Mui-focused .MuiOutlinedInput-notchedOutline': { border: 0 }
+                          }}
+                        >
+                          <MenuItem value="Ton">Ton</MenuItem>
+                          <MenuItem value="Kg">Kg</MenuItem>
+                        </Select>
+                      </InputAdornment>
+                    )
+                  }}
+                />
               );
             }
             

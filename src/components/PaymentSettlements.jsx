@@ -471,7 +471,6 @@ const PaymentSettlement = () => {
                 <TableCell sx={{ fontWeight: 600, bgcolor: "#f5f5f5" }}>Advance</TableCell>
                 <TableCell sx={{ fontWeight: 600, bgcolor: "#f5f5f5" }}>Pending</TableCell>
                 <TableCell sx={{ fontWeight: 600, bgcolor: "#f5f5f5" }}>Status</TableCell>
-                <TableCell align="center" sx={{ fontWeight: 600, bgcolor: "#f5f5f5" }}>Action</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -520,31 +519,11 @@ const PaymentSettlement = () => {
                         sx={{ fontWeight: 600 }}
                       />
                     </TableCell>
-                    <TableCell align="center">
-                      {order.paymentStatus !== "Paid" && order.paymentStatus !== "paid" ? (
-                        <Button
-                          variant="contained"
-                          size="small"
-                          color="success"
-                          onClick={() => confirmMarkAsPaid(order)}
-                          sx={{ textTransform: "none", borderRadius: 1.5 }}
-                        >
-                          Mark as Paid
-                        </Button>
-                      ) : (
-                        <Chip
-                          label="✓ Completed"
-                          color="success"
-                          size="small"
-                          variant="outlined"
-                        />
-                      )}
-                    </TableCell>
                   </TableRow>
                 ))
               ) : (
                 <TableRow>
-                  <TableCell colSpan={9} align="center" sx={{ py: 4 }}>
+                  <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
                     <Typography variant="body1" color="text.secondary">
                       No payment records found for selected filters.
                     </Typography>
