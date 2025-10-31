@@ -75,8 +75,7 @@ const initialFormState = {
   company_name: "", // First field - will be auto-filled and disabled
   vehicle_type: "",
   subtype: "",
-  capacity: "",
-  capacity_unit: "Ton", // New field for unit selection
+  capacity: "", // Will store combined value like "20 Ton" or "500 Kg"
   available_wheels: "",
   price_per_kg: "",
   price_per_tonne: "",
@@ -121,17 +120,12 @@ const vehicleService = {
   getVehicles: async (userId) => {
     if (!userId) return [];
     
-    console.log("🔍 Fetching vehicles for userId:", userId);
-    
     try {
       const allVehicles = [];
       const vehiclesRef = collection(db, VEHICLE_COLLECTION_PATH);
       const vehiclesSnap = await getDocs(vehiclesRef);
       
-      console.log("📦 Vehicle types found:", vehiclesSnap.docs.map(d => d.id));
-      
       if (vehiclesSnap.empty) {
-        console.log("⚠️ Vehicles collection is empty!");
         return [];
       }
       
@@ -142,7 +136,6 @@ const vehicleService = {
         
         try {
           const companiesSnap = await getDocs(companiesRef);
-          console.log(`  📁 ${vehicleType} - Companies:`, companiesSnap.docs.map(d => d.id));
           
           // Iterate through companies
           for (const companyDoc of companiesSnap.docs) {
@@ -151,23 +144,25 @@ const vehicleService = {
             
             try {
               const subtypesSnap = await getDocs(subtypesRef);
-              console.log(`    🚗 ${vehicleType}/${companyName} - Subtypes:`, subtypesSnap.docs.map(d => d.id));
               
               // Iterate through subtypes
               for (const subtypeDoc of subtypesSnap.docs) {
                 const vehicleData = subtypeDoc.data();
-                console.log(`      📄 Data:`, vehicleData);
-                console.log(`      🔐 Vehicle userId: "${vehicleData.userId}" vs Your userId: "${userId}"`);
                 
                 // Only include vehicles belonging to this user
                 if (vehicleData.userId === userId) {
-                  console.log(`      ✅ MATCH! Adding vehicle`);
+                  // Convert old format (separate capacity and capacity_unit) to new format (combined)
+                  let capacity = vehicleData.capacity || "";
+                  if (vehicleData.capacity_unit && capacity && !capacity.includes(vehicleData.capacity_unit)) {
+                    // Old format detected - combine them
+                    capacity = `${capacity} ${vehicleData.capacity_unit}`;
+                  }
+                  
                   allVehicles.push({
                     id: `${vehicleType}_${companyName}_${subtypeDoc.id}`,
                     ...vehicleData,
+                    capacity: capacity, // Use combined capacity
                   });
-                } else {
-                  console.log(`      ❌ NO MATCH! userId doesn't match`);
                 }
               }
             } catch (err) {
@@ -179,10 +174,9 @@ const vehicleService = {
         }
       }
       
-      console.log(`\n🎯 Total vehicles found: ${allVehicles.length}`);
       return allVehicles;
     } catch (error) {
-      console.error("❌ Error fetching vehicles:", error);
+      console.error("Error fetching vehicles:", error);
       return [];
     }
   },
@@ -191,7 +185,7 @@ const vehicleService = {
   saveVehicle: async (vehicleData, originalVehicle, userId) => {
     if (!userId) throw new Error("User not authenticated");
     
-    const { vehicle_type, company_name, subtype, capacity, capacity_unit, available_wheels, price_per_kg, price_per_tonne } = vehicleData;
+    const { vehicle_type, company_name, subtype, capacity, available_wheels, price_per_kg, price_per_tonne } = vehicleData;
     
     if (!vehicle_type || !company_name || !subtype) {
       throw new Error("Vehicle type, company name, and subtype are required");
@@ -209,11 +203,6 @@ const vehicleService = {
     const cleanCompanyName = sanitizeString(company_name);
     const cleanSubtype = sanitizeString(subtype);
     
-    console.log("💾 Saving vehicle...");
-    console.log("   Vehicle Type:", cleanVehicleType);
-    console.log("   Company Name:", cleanCompanyName);
-    console.log("   Subtype:", cleanSubtype);
-    
     // Create the nested structure: Vehicles/{type}/Companies/{company}/subtypes/{subtype}
     // We need to ensure intermediate documents exist
     const vehicleTypeDocRef = doc(db, VEHICLE_COLLECTION_PATH, cleanVehicleType);
@@ -224,16 +213,13 @@ const vehicleService = {
       vehicle_type: cleanVehicleType,
       company_name: cleanCompanyName,
       subtype: cleanSubtype,
-      capacity: sanitizeString(capacity),
-      capacity_unit: sanitizeString(capacity_unit || "Ton"),
+      capacity: sanitizeString(capacity), // Now stores combined value like "20 Ton"
       available_wheels: sanitizeString(available_wheels),
       price_per_kg: sanitizeString(price_per_kg),
       price_per_tonne: sanitizeString(price_per_tonne),
       userId: userId.trim(),
       createdAt: new Date().toISOString(),
     };
-    
-    console.log("� Data to save:", vehicleDataToSave);
     
     // Save the actual data in the subtype document
     await setDoc(subtypeDocRef, vehicleDataToSave);
@@ -607,7 +593,7 @@ function VehicleTable({ vehicles, loading, onView, onEdit, onDelete }) {
                 </TableCell>
                 <TableCell>{v.subtype}</TableCell>
                 <TableCell>{v.vehicle_type}</TableCell>
-                <TableCell>{v.capacity} {v.capacity_unit || 'Ton'}</TableCell>
+                <TableCell>{v.capacity}</TableCell>
                 <TableCell>{v.available_wheels}</TableCell>
                 <TableCell>{v.price_per_kg}</TableCell>
                 <TableCell>{v.price_per_tonne}</TableCell>
@@ -684,11 +670,6 @@ function VehicleFormDialog({ open, onClose, onSubmit, vehicle, isEditMode, compa
       <DialogContent>
         <Stack spacing={2} mt={1}>
           {Object.keys(initialFormState).map((key) => {
-            // Skip capacity_unit as it's handled with capacity field
-            if (key === "capacity_unit") {
-              return null;
-            }
-
             // Render dropdown for vehicle_type
             if (key === "vehicle_type") {
               return (
@@ -714,13 +695,22 @@ function VehicleFormDialog({ open, onClose, onSubmit, vehicle, isEditMode, compa
 
             // Special handling for capacity field with unit selector
             if (key === "capacity") {
+              // Parse existing capacity value (e.g., "20 Ton" -> { value: "20", unit: "Ton" })
+              const capacityMatch = (formData[key] || "").match(/^([\d.]+)\s*(.*)$/);
+              const capacityValue = capacityMatch ? capacityMatch[1] : "";
+              const capacityUnit = capacityMatch ? (capacityMatch[2] || "Ton") : "Ton";
+              
               return (
                 <TextField
                   key={key}
                   name={key}
                   label="Capacity"
-                  value={formData[key]}
-                  onChange={handleChange}
+                  value={capacityValue}
+                  onChange={(e) => {
+                    // Combine number and unit
+                    const newValue = e.target.value ? `${e.target.value} ${capacityUnit}` : "";
+                    handleChange({ target: { name: key, value: newValue } });
+                  }}
                   error={!!errors[key]}
                   helperText={errors[key]}
                   fullWidth
@@ -730,9 +720,13 @@ function VehicleFormDialog({ open, onClose, onSubmit, vehicle, isEditMode, compa
                     endAdornment: (
                       <InputAdornment position="end">
                         <Select
-                          name="capacity_unit"
-                          value={formData.capacity_unit || "Ton"}
-                          onChange={handleChange}
+                          value={capacityUnit}
+                          onChange={(e) => {
+                            // Update the unit part
+                            const newUnit = e.target.value;
+                            const newValue = capacityValue ? `${capacityValue} ${newUnit}` : "";
+                            handleChange({ target: { name: key, value: newValue } });
+                          }}
                           sx={{ 
                             minWidth: 80,
                             '& .MuiOutlinedInput-notchedOutline': { border: 0 },
