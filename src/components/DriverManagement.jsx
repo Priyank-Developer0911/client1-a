@@ -122,21 +122,23 @@ const DriverManagement = () => {
   const [companyName, setCompanyName] = useState("");
 
   // Fetch company name for approval
+  // Fetch company name from companies collection using userId
   const fetchCompanyName = useCallback(async () => {
-    if (!user) return null;
+    if (!user) return "";
     
     try {
       const companiesRef = collection(db, "companies");
-      const companiesQuery = query(companiesRef, where("userId", "==", user.uid));
-      const companiesSnap = await getDocs(companiesQuery);
+      const q = query(companiesRef, where("userId", "==", user.uid));
+      const querySnapshot = await getDocs(q);
       
-      if (!companiesSnap.empty) {
-        const companyDoc = companiesSnap.docs[0];
+      if (!querySnapshot.empty) {
+        const companyDoc = querySnapshot.docs[0];
         const companyData = companyDoc.data();
-        return companyData.companyName || companyData.company_name || "";
+        const companyName = companyData.company_name || companyData.companyName || "";
+        return companyName;
+      } else {
+        return "";
       }
-      
-      return "";
     } catch (error) {
       console.error("Error fetching company name:", error);
       return "";
@@ -149,50 +151,43 @@ const DriverManagement = () => {
     
     setLoading(true);
     try {
-      // Get company name first
+      // Step 1: Get company name from companies collection using userId
       const fetchedCompanyName = await fetchCompanyName();
       setCompanyName(fetchedCompanyName);
       
+      if (!fetchedCompanyName) {
+        setLoading(false);
+        return;
+      }
+      
       const driversRef = collection(db, "Drivers");
       
-      // Fetch both approved and pending drivers for this user
-      const driversQuery = query(driversRef, where("userId", "==", user.uid));
-      const driversSnap = await getDocs(driversQuery);
+      // Step 2: Fetch ALL drivers from the Drivers collection
+      const allDriversSnap = await getDocs(driversRef);
       
+      // Step 3: Filter drivers where approvedBy matches company name OR company_name matches
       let allDrivers = [];
-      driversSnap.forEach((doc) => {
+      allDriversSnap.forEach((doc) => {
         const data = doc.data();
-        allDrivers.push({ 
-          id: doc.id, 
-          ...data,
-          // Ensure approvalStatus exists, default to 'approved' for old records
-          approvalStatus: data.approvalStatus || 'approved'
-        });
-      });
-      
-      // Also fetch pending drivers from the company (if company_name exists)
-      if (fetchedCompanyName) {
-        const pendingQuery = query(
-          driversRef, 
-          where("company_name", "==", fetchedCompanyName),
-          where("approvalStatus", "==", "pending")
-        );
-        const pendingSnap = await getDocs(pendingQuery);
         
-        pendingSnap.forEach((doc) => {
-          const data = doc.data();
-          // Add if not already in list (avoid duplicates)
-          if (!allDrivers.find(d => d.id === doc.id)) {
-            allDrivers.push({ 
-              id: doc.id, 
-              ...data 
-            });
-          }
-        });
-      }
+        // Check if this driver belongs to the company by checking approvedBy OR company_name
+        const matchesCompany = 
+          data.approvedBy === fetchedCompanyName || 
+          data.company_name === fetchedCompanyName;
+        
+        if (matchesCompany || data.approvalStatus === 'pending') {
+          allDrivers.push({ 
+            id: doc.id, 
+            ...data,
+            // Ensure approvalStatus exists, default to 'approved' for old records
+            approvalStatus: data.approvalStatus || 'approved'
+          });
+        }
+      });
       
       setDrivers(allDrivers);
     } catch (error) {
+      console.error("Error fetching drivers:", error);
       setSnackbar({
         open: true,
         message: "Error fetching drivers: " + error.message,
@@ -208,19 +203,34 @@ const DriverManagement = () => {
 
   useEffect(() => {
     const lower = sanitize(search);
-    setFiltered(
-      drivers.filter((d) =>
-        [
-          d.firstName,
-          d.lastName,
-          d.mobileNumber,
-          d.city,
-          d.state,
-          d.vehicleNumber,
-        ].some((field) => sanitize(String(field)).includes(lower))
-      )
-    );
-  }, [search, drivers]);
+    
+    // Filter logic:
+    // 1. If no search term: Show only approved drivers where approvedBy matches company_name
+    // 2. If searching: Show matching drivers (including pending ones)
+    if (!lower) {
+      // No search - show only approved drivers from this company
+      setFiltered(
+        drivers.filter((d) => 
+          d.approvalStatus === 'approved' && 
+          d.approvedBy === companyName
+        )
+      );
+    } else {
+      // Searching - show all matching drivers (approved + pending)
+      setFiltered(
+        drivers.filter((d) =>
+          [
+            d.firstName,
+            d.lastName,
+            d.mobileNumber,
+            d.city,
+            d.state,
+            d.vehicleNumber,
+          ].some((field) => sanitize(String(field)).includes(lower))
+        )
+      );
+    }
+  }, [search, drivers, companyName]);
 
   const openForm = (mode, driver = null) => {
     setFormMode(mode);
